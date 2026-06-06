@@ -1,0 +1,58 @@
+// smartroute-web/src/App.jsx
+import { useState, useEffect } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "./firebase";
+import Login from "./pages/Login";
+import DispatcherDashboard from "./pages/DispatcherDashboard";
+import AdminPanel from "./pages/AdminPanel";
+
+export default function App() {
+  const [user, setUser]       = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          if (data.role === "dispatcher" || data.role === "admin") {
+            setUser({
+              uid:   firebaseUser.uid,
+              email: firebaseUser.email,
+              ...data,
+            });
+          } else {
+            // Drivers use the mobile app
+            await auth.signOut();
+            setUser(null);
+          }
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ display:"flex", justifyContent:"center",
+        alignItems:"center", minHeight:"100vh",
+        fontFamily:"Arial, sans-serif", fontSize:16,
+        color:"#64748B" }}>
+        Loading SmartRoute...
+      </div>
+    );
+  }
+
+  if (!user) return <Login onLogin={setUser} />;
+
+  // ✅ Route by role
+  if (user.role === "admin")      return <AdminPanel user={user} />;
+  if (user.role === "dispatcher") return <DispatcherDashboard user={user} />;
+
+  return <Login onLogin={setUser} />;
+}
