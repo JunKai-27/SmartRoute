@@ -1,0 +1,86 @@
+// context/AuthContext.js
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { auth, db } from "../firebaseConfig";
+import { registerForPushNotifications } from "../utils/notifications";
+
+const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser]         = useState(null);
+  const [role, setRole]         = useState(null);
+  const [status, setStatus]     = useState(null); // ← NEW: "pending" | "active"
+  const [loading, setLoading]   = useState(true);
+  const [profileUnsub, setProfileUnsub] = useState(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log("🔵 Auth state:", firebaseUser ? firebaseUser.email : "null");
+
+      // Cleanup previous profile listener
+      if (profileUnsub) profileUnsub();
+
+      if (firebaseUser) {
+        try {
+          // ✅ Use real-time listener on user profile
+          // So when admin approves, app updates INSTANTLY without re-login
+          const userRef = doc(db, "users", firebaseUser.uid);
+          const unsub = onSnapshot(userRef, (userDoc) => {
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              console.log("🎭 Role:", data.role, "Status:", data.status);
+              setRole(data.role);
+              setStatus(data.status || "pending");
+
+              // Register push token only for active approved drivers
+              if (data.role === "driver" && data.status === "active") {
+                registerForPushNotifications(firebaseUser.uid);
+              }
+            } else {
+              setRole(null);
+              setStatus(null);
+            }
+            setLoading(false);
+          });
+
+          setUser(firebaseUser);
+          setProfileUnsub(() => unsub);
+
+        } catch (error) {
+          console.error("❌ Firestore error:", error.message);
+          setRole(null);
+          setStatus(null);
+          setUser(firebaseUser);
+          setLoading(false);
+        }
+      } else {
+        setUser(null);
+        setRole(null);
+        setStatus(null);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      if (profileUnsub) profileUnsub();
+    };
+  }, []);
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("❌ Logout error:", error);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, role, status, loading, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => useContext(AuthContext);
